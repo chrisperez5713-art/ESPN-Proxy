@@ -11,11 +11,17 @@ app.use(express.static(path.join(__dirname, "public")));
 
 const BASE = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons";
 
+const espnCookie =
+  process.env.ESPN_S2 && process.env.ESPN_SWID
+    ? `espn_s2=${process.env.ESPN_S2}; SWID=${process.env.ESPN_SWID}`
+    : "";
+
 const ESPN_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
   Accept: "application/json",
   Referer: "https://fantasy.espn.com/",
+  ...(espnCookie ? { Cookie: espnCookie } : {}),
 };
 
 app.get("/teams/:leagueId/:year", async (req, res) => {
