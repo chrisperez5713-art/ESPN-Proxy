@@ -11,10 +11,17 @@ app.use(express.static(path.join(__dirname, "public")));
 
 const BASE = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons";
 
+const ESPN_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+  Accept: "application/json",
+  Referer: "https://fantasy.espn.com/",
+};
+
 app.get("/teams/:leagueId/:year", async (req, res) => {
   const { leagueId, year } = req.params;
   try {
-    const r = await fetch(`${BASE}/${year}/segments/0/leagues/${leagueId}?view=mTeam`);
+    const r = await fetch(`${BASE}/${year}/segments/0/leagues/${leagueId}?view=mTeam`, { headers: ESPN_HEADERS });
     if (!r.ok) return res.status(r.status).json({ error: `ESPN returned ${r.status}` });
     res.json(await r.json());
   } catch (e) {
@@ -26,7 +33,8 @@ app.get("/week/:leagueId/:year/:week", async (req, res) => {
   const { leagueId, year, week } = req.params;
   try {
     const r = await fetch(
-      `${BASE}/${year}/segments/0/leagues/${leagueId}?view=mMatchupScore&view=mBoxscore&scoringPeriodId=${week}`
+      `${BASE}/${year}/segments/0/leagues/${leagueId}?view=mMatchupScore&view=mBoxscore&scoringPeriodId=${week}`,
+      { headers: ESPN_HEADERS }
     );
     if (!r.ok) return res.status(r.status).json({ error: `ESPN returned ${r.status}` });
     res.json(await r.json());
