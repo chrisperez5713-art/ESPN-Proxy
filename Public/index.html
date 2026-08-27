@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>League Manager</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+
+const { useState, useEffect, useCallback } = React;
+
+const POS = { 1: "QB", 2: "RB", 3: "WR", 4: "TE", 5: "K", 16: "D/ST" };
+const BENCH_SLOTS = new Set([20, 21]);
+
+function teamName(t) {
+  if (t.name) return t.name;
+  return `${t.location || ""} ${t.nickname || ""}`.trim() || `Team ${t.id}`;
+}
+
+function playerPoints(entry) {
+  if (typeof entry.playerPoolEntry?.appliedStatTotal === "number") {
+    return entry.playerPoolEntry.appliedStatTotal;
+  }
+  return 0;
+}
+
+function computeWeekContests(scheduleForWeek, contestDefs) {
+  const bestByPos = {};
+  const margins = [];
+
+  scheduleForWeek.forEach((m) => {
+    [m.home, m.away].forEach((side) => {
+      if (!side || side.totalPoints == null) return;
+      const entries = side.rosterForCurrentScoringPeriod?.entries || [];
+      entries.forEach((e) => {
+        if (BENCH_SLOTS.has(e.lineupSlotId)) return;
+        const posId = e.playerPoolEntry?.player?.defaultPositionId;
+        const code = POS[posId];
+        if (!code) return;
+        const pts = playerPoints(e);
+        const cur = bestByPos[code];
+        if (!cur || pts > cur.points) {
+          bestByPos[code] = {
+            points: pts,
+            teamId: side.teamId,
+            playerName: e.playerPoolEntry?.player?.fullName || "Unknown",
+          };
+        }
+      });
+    });
+    if (m.home?.totalPoints != null && m.away?.totalPoints != null && (m.home.totalPoints > 0 || m.away.totalPoints > 0)) {
+      const diff = Math.abs(m.home.totalPoints - m.away.totalPoints);
+      margins.push({ diff, home: m.home, away: m.away });
+    }
+  });
+
+  const results = {};
+  contestDefs.forEach((c) => {
+    if (c.position === "MARGIN") {
+      if (margins.length === 0) return;
+      const closest = margins.reduce((a, b) => (b.diff < a.diff ? b : a));
+      const winnerSide = closest.home.totalPoints >= closest.away.totalPoints ? closest.home : closest.away;
+      results[c.id] = { teamId: winnerSide.teamId, detail: `won by ${closest.diff.toFixed(2)}` };
+    } else {
+      const best = bestByPos[c.position];
+      if (!best) return;
+      results[c.id] = { teamId: best.teamId, detail: `${best.playerName} — ${best.points.toFixed(2)} pts` };
+    }
+  });
+  return results;
+}
+
+const DEFAULT_CONTESTS = [
+  { id: "qb", name: "Highest QB", position: "QB", payout: 5 },
+  { id: "rb", name: "Highest RB", position: "RB", payout: 5 },
+  { id: "wr", name: "Highest WR", position: "WR", payout: 5 },
+  { id: "te", name: "Highest TE", position: "TE", payout: 5 },
+  { id: "k", name: "Highest K", position: "K", payout: 5 },
+  { id: "dst", name: "Highest D/ST", position: "D/ST", payout: 5 },
+  { id: "margin", name: "Closest Win", position: "MARGIN", payout: 5 },
+];
+
+const TOKENS = {
+  bg: "#10231C", panel: "#17332A", border: "#2A4B3F", text: "#F2EFE6",
+  muted: "#9FB3AA", gold: "#D8A93C", red: "#C1503A", teal: "#4FA98A",
+};
+
+const styles = {
+  app: { background: TOKENS.bg, color: TOKENS.text, minHeight: "100vh", fontFamily: "'Inter', sans-serif", padding: "24px 20px 60px" },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20, borderBottom: `1px solid ${TOKENS.border}`, paddingBottom: 16, flexWrap: "wrap", gap: 12 },
+  eyebrow: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.18em", color: TOKENS.teal, marginBottom: 4 },
+  eyebrowSmall: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.14em", color: TOKENS.muted, marginBottom: 12 },
+  h1: { fontFamily: "'Teko', sans-serif", fontWeight: 600, fontSize: 36, margin: 0 },
+  potBox: { textAlign: "right" },
+  potLabel: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.14em", color: TOKENS.muted },
+  potNumber: { fontFamily: "'Teko', sans-serif", fontSize: 48, color: TOKENS.gold, lineHeight: 1, fontVariantNumeric: "tabular-nums" },
+  tabs: { display: "flex", gap: 4, marginBottom: 20, flexWrap: "wrap" },
+  tabBtn: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, letterSpacing: "0.08em", background: "transparent", border: `1px solid ${TOKENS.border}`, color: TOKENS.muted, padding: "8px 14px", cursor: "pointer", borderRadius: 4 },
+  tabBtnActive: { color: TOKENS.bg, background: TOKENS.teal, borderColor: TOKENS.teal },
+  main: { maxWidth: 780, margin: "0 auto" },
+  card: { background: TOKENS.panel, border: `1px solid ${TOKENS.border}`, borderRadius: 6, padding: 20, marginBottom: 16 },
+  row: { display: "flex", alignItems: "center", marginBottom: 12, gap: 12, flexWrap: "wrap" },
+  rowLabel: { width: 190, fontSize: 13, color: TOKENS.muted, flexShrink: 0 },
+  input: { flex: 1, minWidth: 140, background: TOKENS.bg, border: `1px solid ${TOKENS.border}`, color: TOKENS.text, padding: "8px 10px", borderRadius: 4, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13 },
+  smallInput: { width: 60, background: TOKENS.bg, border: `1px solid ${TOKENS.border}`, color: TOKENS.gold, padding: "6px 8px", borderRadius: 4, fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, textAlign: "right" },
+  contestRow: { display: "flex", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${TOKENS.border}`, fontSize: 14 },
+  primaryBtn: { marginTop: 16, background: TOKENS.gold, color: TOKENS.bg, border: "none", padding: "10px 20px", borderRadius: 4, fontFamily: "'IBM Plex Mono', monospace", fontWeight: 600, fontSize: 13, letterSpacing: "0.06em", cursor: "pointer" },
+  error: { marginTop: 12, color: TOKENS.red, fontSize: 13, border: `1px solid ${TOKENS.red}`, borderRadius: 4, padding: 10 },
+  weekHeader: { fontFamily: "'Teko', sans-serif", fontSize: 24, color: TOKENS.gold, letterSpacing: "0.04em", marginBottom: 12 },
+  contestGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 },
+  statTile: { background: TOKENS.bg, border: `1px solid ${TOKENS.border}`, borderRadius: 4, padding: 10 },
+  statLabel: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: "0.08em", color: TOKENS.muted, marginBottom: 4 },
+  statWinner: { fontSize: 14, fontWeight: 600 },
+  statDetail: { fontSize: 12, color: TOKENS.muted, marginTop: 2 },
+  statAmount: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: TOKENS.teal, marginTop: 4 },
+  table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
+  th: { textAlign: "left", color: TOKENS.muted, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.06em", borderBottom: `1px solid ${TOKENS.border}`, padding: "6px 8px" },
+  td: { padding: "8px 8px", borderBottom: `1px solid ${TOKENS.border}` },
+  summaryGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 16 },
+  summaryTile: { background: TOKENS.panel, border: `1px solid ${TOKENS.border}`, borderRadius: 6, padding: 16 },
+  summaryValue: { fontFamily: "'Teko', sans-serif", fontSize: 28, marginTop: 4 },
+};
+
+function Row({ label, children }) {
+  return <div style={styles.row}><label style={styles.rowLabel}>{label}</label>{children}</div>;
+}
+function SummaryTile({ label, value, accent }) {
+  return (
+    <div style={{ ...styles.summaryTile, ...(accent ? { borderColor: TOKENS.gold } : {}) }}>
+      <div style={styles.statLabel}>{label}</div>
+      <div style={{ ...styles.summaryValue, ...(accent ? { color: TOKENS.gold } : {}) }}>{value}</div>
+    </div>
+  );
+}
+function Empty({ text }) {
+  return <div style={{ color: TOKENS.muted, fontSize: 14, padding: "12px 0" }}>{text}</div>;
+}
+
+function LeagueDashboard() {
+  const [leagueId, setLeagueId] = useState(localStorage.getItem("leagueId") || "605596508");
+  const [year, setYear] = useState(localStorage.getItem("year") || "2024");
+  const [weeks, setWeeks] = useState(14);
+  const [buyIn, setBuyIn] = useState(20);
+  const [contests, setContests] = useState(DEFAULT_CONTESTS);
+  const [firstPlacePayout, setFirstPlacePayout] = useState(75);
+
+  const [teams, setTeams] = useState([]);
+  const [rawWeeklySchedules, setRawWeeklySchedules] = useState({});
+  const [weeklyResults, setWeeklyResults] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState("setup");
+
+  const [duesPaid, setDuesPaid] = useState({});
+  const [winningsPaid, setWinningsPaid] = useState({});
+  const [champion, setChampion] = useState("");
+  const [runnerUp, setRunnerUp] = useState("");
+
+  const storageKey = `ledger:${leagueId}-${year}`;
+
+  useEffect(() => {
+    localStorage.setItem("leagueId", leagueId);
+    localStorage.setItem("year", year);
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+      if (saved) {
+        setDuesPaid(saved.duesPaid || {});
+        setWinningsPaid(saved.winningsPaid || {});
+        setChampion(saved.champion || "");
+        setRunnerUp(saved.runnerUp || "");
+      }
+    } catch (e) {}
+  }, [storageKey]);
+
+  const persist = useCallback((next) => {
+    localStorage.setItem(storageKey, JSON.stringify({
+      duesPaid: next.duesPaid ?? duesPaid,
+      winningsPaid: next.winningsPaid ?? winningsPaid,
+      champion: next.champion ?? champion,
+      runnerUp: next.runnerUp ?? runnerUp,
+    }));
+  }, [storageKey, duesPaid, winningsPaid, champion, runnerUp]);
+
+  useEffect(() => {
+    const results = {};
+    Object.entries(rawWeeklySchedules).forEach(([week, sched]) => {
+      results[week] = computeWeekContests(sched, contests);
+    });
+    setWeeklyResults(results);
+  }, [rawWeeklySchedules, contests]);
+
+  async function autoSync() {
+    setLoading(true);
+    setError("");
+    try {
+      const teamRes = await fetch(`/teams/${leagueId}/${year}`).then((r) => r.json());
+      if (teamRes.error) throw new Error(teamRes.error);
+      setTeams(teamRes.teams || []);
+
+      const raw = {};
+      for (let w = 1; w <= Number(weeks); w++) {
+        try {
+          const wk = await fetch(`/week/${leagueId}/${year}/${w}`).then((r) => r.json());
+          if (wk.error) continue;
+          const sched = (wk.schedule || []).filter((m) => m.matchupPeriodId === w);
+          const played = sched.some((m) => (m.home?.totalPoints || 0) > 0 || (m.away?.totalPoints || 0) > 0);
+          if (played) raw[w] = sched;
+        } catch (e) {}
+      }
+      setRawWeeklySchedules(raw);
+      setTab("contests");
+    } catch (e) {
+      setError("Sync failed: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const teamsById = Object.fromEntries(teams.map((t) => [t.id, t]));
+  const memberCount = teams.length || 10;
+  const pot = buyIn * memberCount;
+
+  const winningsList = [];
+  Object.entries(weeklyResults).forEach(([week, cs]) => {
+    Object.entries(cs).forEach(([contestId, r]) => {
+      const contest = contests.find((c) => c.id === contestId);
+      if (!contest) return;
+      winningsList.push({ key: `w${week}-${contestId}`, week, contestName: contest.name, teamId: r.teamId, detail: r.detail, amount: contest.payout });
+    });
+  });
+
+  const totalContestPayouts = winningsList.reduce((s, w) => s + w.amount, 0);
+  const secondPlacePayout = Math.max(pot - totalContestPayouts - firstPlacePayout, 0);
+  const duesTotal = memberCount * buyIn;
+  const duesCollected = teams.filter((t) => duesPaid[t.id]).length * buyIn;
+  const totalOwedOut = totalContestPayouts + firstPlacePayout + secondPlacePayout;
+  const totalPaidOut = winningsList.filter((w) => winningsPaid[w.key]).reduce((s, w) => s + w.amount, 0)
+    + (winningsPaid["place-1"] ? firstPlacePayout : 0) + (winningsPaid["place-2"] ? secondPlacePayout : 0);
+
+  function toggleDue(teamId) { const next = { ...duesPaid, [teamId]: !duesPaid[teamId] }; setDuesPaid(next); persist({ duesPaid: next }); }
+  function toggleWinning(key) { const next = { ...winningsPaid, [key]: !winningsPaid[key] }; setWinningsPaid(next); persist({ winningsPaid: next }); }
+  function setChampionPersist(id) { setChampion(id); persist({ champion: id }); }
+  function setRunnerUpPersist(id) { setRunnerUp(id); persist({ runnerUp: id }); }
+
+  return (
+    <div style={styles.app}>
+      <header style={styles.header}>
+        <div>
+          <div style={styles.eyebrow}>LEAGUE MANAGER</div>
+          <h1 style={styles.h1}>The Ledger &amp; The Board</h1>
+        </div>
+        <div style={styles.potBox}>
+          <div style={styles.potLabel}>POT</div>
+          <div style={styles.potNumber}>${pot}</div>
+        </div>
+      </header>
+
+      <nav style={styles.tabs}>
+        {["setup", "contests", "standings", "ledger"].map((t) => (
+          <button key={t} onClick={() => setTab(t)} style={{ ...styles.tabBtn, ...(tab === t ? styles.tabBtnActive : {}) }}>
+            {t.toUpperCase()}
+          </button>
+        ))}
+      </nav>
+
+      <main style={styles.main}>
+        {tab === "setup" && (
+          <div style={styles.card}>
+            <Row label="League ID"><input style={styles.input} value={leagueId} onChange={(e) => setLeagueId(e.target.value)} /></Row>
+            <Row label="Season"><input style={styles.input} value={year} onChange={(e) => setYear(e.target.value)} /></Row>
+            <Row label="Regular season weeks"><input style={styles.input} type="number" value={weeks} onChange={(e) => setWeeks(e.target.value)} /></Row>
+            <Row label="Buy-in per team ($)"><input style={styles.input} type="number" value={buyIn} onChange={(e) => setBuyIn(Number(e.target.value))} /></Row>
+            <Row label="1st place payout ($)"><input style={styles.input} type="number" value={firstPlacePayout} onChange={(e) => setFirstPlacePayout(Number(e.target.value))} /></Row>
+            <div style={{ marginTop: 8, marginBottom: 4, color: TOKENS.muted, fontSize: 13 }}>2nd place gets whatever remains in the pot after contests + 1st place.</div>
+
+            <div style={{ marginTop: 20 }}>
+              <div style={styles.eyebrowSmall}>WEEKLY CONTESTS</div>
+              {contests.map((c, i) => (
+                <div key={c.id} style={styles.contestRow}>
+                  <span style={{ flex: 1 }}>{c.name}</span>
+                  <span style={{ color: TOKENS.muted, fontSize: 12, marginRight: 12 }}>{c.position === "MARGIN" ? "smallest margin of victory" : `top ${c.position} starter`}</span>
+                  <input style={styles.smallInput} type="number" value={c.payout} onChange={(e) => { const next = [...contests]; next[i] = { ...c, payout: Number(e.target.value) }; setContests(next); }} />
+                </div>
+              ))}
+            </div>
+
+            {error && <div style={styles.error}>{error}</div>}
+
+            <button style={styles.primaryBtn} onClick={autoSync} disabled={loading}>
+              {loading ? "Syncing…" : "Sync League"}
+            </button>
+          </div>
+        )}
+
+        {tab === "contests" && (
+          <div>
+            {teams.length === 0 && <Empty text="Sync your league from Setup first." />}
+            {Object.keys(weeklyResults).sort((a, b) => Number(a) - Number(b)).map((week) => (
+              <div key={week} style={styles.card}>
+                <div style={styles.weekHeader}>WEEK {week}</div>
+                <div style={styles.contestGrid}>
+                  {contests.map((c) => {
+                    const r = weeklyResults[week][c.id];
+                    return (
+                      <div key={c.id} style={styles.statTile}>
+                        <div style={styles.statLabel}>{c.name}</div>
+                        {r ? (
+                          <>
+                            <div style={styles.statWinner}>{teamsById[r.teamId] ? teamName(teamsById[r.teamId]) : `Team ${r.teamId}`}</div>
+                            <div style={styles.statDetail}>{r.detail}</div>
+                            <div style={styles.statAmount}>+${c.payout}</div>
+                          </>
+                        ) : <div style={styles.statDetail}>—</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === "standings" && (
+          <div style={styles.card}>
+            {teams.length === 0 && <Empty text="Sync your league from Setup first." />}
+            {teams.length > 0 && (
+              <>
+                <table style={styles.table}>
+                  <thead><tr><th style={styles.th}>Team</th><th style={styles.th}>Record</th><th style={styles.th}>PF</th></tr></thead>
+                  <tbody>
+                    {[...teams].sort((a, b) => (b.record?.overall?.wins || 0) - (a.record?.overall?.wins || 0) || (b.record?.overall?.pointsFor || 0) - (a.record?.overall?.pointsFor || 0)).map((t) => (
+                      <tr key={t.id}>
+                        <td style={styles.td}>{teamName(t)}</td>
+                        <td style={styles.td}>{t.record?.overall?.wins}-{t.record?.overall?.losses}{t.record?.overall?.ties ? `-${t.record.overall.ties}` : ""}</td>
+                        <td style={styles.td}>{(t.record?.overall?.pointsFor || 0).toFixed(1)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ marginTop: 20, color: TOKENS.muted, fontSize: 13 }}>Regular season order shown above — playoffs decide the actual champion, so set it manually:</div>
+                <Row label="Champion (1st)">
+                  <select style={styles.input} value={champion} onChange={(e) => setChampionPersist(e.target.value)}>
+                    <option value="">— select —</option>
+                    {teams.map((t) => <option key={t.id} value={t.id}>{teamName(t)}</option>)}
+                  </select>
+                </Row>
+                <Row label="Runner-up (2nd)">
+                  <select style={styles.input} value={runnerUp} onChange={(e) => setRunnerUpPersist(e.target.value)}>
+                    <option value="">— select —</option>
+                    {teams.map((t) => <option key={t.id} value={t.id}>{teamName(t)}</option>)}
+                  </select>
+                </Row>
+              </>
+            )}
+          </div>
+        )}
+
+        {tab === "ledger" && (
+          <div>
+            <div style={styles.summaryGrid}>
+              <SummaryTile label="Dues collected" value={`$${duesCollected} / $${duesTotal}`} />
+              <SummaryTile label="Paid out" value={`$${totalPaidOut} / $${totalOwedOut}`} />
+              <SummaryTile label="Pot remaining" value={`$${pot - totalPaidOut}`} accent />
+            </div>
+
+            <div style={styles.card}>
+              <div style={styles.eyebrowSmall}>BUY-INS</div>
+              <table style={styles.table}>
+                <thead><tr><th style={styles.th}>Team</th><th style={styles.th}>Owes</th><th style={styles.th}>Paid</th></tr></thead>
+                <tbody>
+                  {teams.map((t) => (
+                    <tr key={t.id}>
+                      <td style={styles.td}>{teamName(t)}</td>
+                      <td style={styles.td}>${buyIn}</td>
+                      <td style={styles.td}><input type="checkbox" checked={!!duesPaid[t.id]} onChange={() => toggleDue(t.id)} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={styles.card}>
+              <div style={styles.eyebrowSmall}>WEEKLY WINNINGS</div>
+              {winningsList.length === 0 && <Empty text="No contest results yet." />}
+              <table style={styles.table}>
+                <thead><tr><th style={styles.th}>Week</th><th style={styles.th}>Contest</th><th style={styles.th}>Winner</th><th style={styles.th}>Amount</th><th style={styles.th}>Paid</th></tr></thead>
+                <tbody>
+                  {winningsList.map((w) => (
+                    <tr key={w.key}>
+                      <td style={styles.td}>{w.week}</td>
+                      <td style={styles.td}>{w.contestName}</td>
+                      <td style={styles.td}>{teamsById[w.teamId] ? teamName(teamsById[w.teamId]) : w.teamId}</td>
+                      <td style={styles.td}>${w.amount}</td>
+                      <td style={styles.td}><input type="checkbox" checked={!!winningsPaid[w.key]} onChange={() => toggleWinning(w.key)} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={styles.card}>
+              <div style={styles.eyebrowSmall}>SEASON PAYOUTS</div>
+              <table style={styles.table}>
+                <thead><tr><th style={styles.th}>Place</th><th style={styles.th}>Team</th><th style={styles.th}>Amount</th><th style={styles.th}>Paid</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td style={styles.td}>1st</td>
+                    <td style={styles.td}>{champion ? teamName(teamsById[champion]) : "—"}</td>
+                    <td style={styles.td}>${firstPlacePayout}</td>
+                    <td style={styles.td}><input type="checkbox" checked={!!winningsPaid["place-1"]} onChange={() => toggleWinning("place-1")} /></td>
+                  </tr>
+                  <tr>
+                    <td style={styles.td}>2nd</td>
+                    <td style={styles.td}>{runnerUp ? teamName(teamsById[runnerUp]) : "—"}</td>
+                    <td style={styles.td}>${secondPlacePayout}</td>
+                    <td style={styles.td}><input type="checkbox" checked={!!winningsPaid["place-2"]} onChange={() => toggleWinning("place-2")} /></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<LeagueDashboard />);
+</script>
+</body>
+</html>
