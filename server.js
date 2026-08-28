@@ -1,12 +1,14 @@
 import express from "express";
 import cors from "cors";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 app.use(cors());
+app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 const BASE = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons";
@@ -56,6 +58,25 @@ app.get("/week/:leagueId/:year/:week", async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+const SETTINGS_FILE = path.join(__dirname, "settings.json");
+function readSettings() {
+  try {
+    return JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
+  } catch {
+    return {};
+  }
+}
+function writeSettings(s) {
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s));
+}
+
+app.get("/settings", (req, res) => res.json(readSettings()));
+app.post("/settings", (req, res) => {
+  const next = { ...readSettings(), ...req.body };
+  writeSettings(next);
+  res.json(next);
 });
 
 const port = process.env.PORT || 3000;
