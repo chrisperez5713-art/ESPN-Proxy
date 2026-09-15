@@ -159,13 +159,9 @@ function activeContestForWeek(week) {
   return CONTEST_POOL[(week - 1) % CONTEST_POOL.length];
 }
 
-const DARK = {
+const TOKENS = {
   bg: "#0E1F19", panel: "#16302A", panelAlt: "#1C3A32", border: "#294B41", text: "#F2EFE6",
   muted: "#B7C8C0", gold: "#E3B94F", red: "#E0705A", teal: "#5FC29E",
-};
-const LIGHT = {
-  bg: "#F7F5EE", panel: "#FFFFFF", panelAlt: "#EFEAD9", border: "#D8D2C0", text: "#1E2A24",
-  muted: "#5B6B63", gold: "#9C6F0E", red: "#B3402C", teal: "#1E7A5C",
 };
 
 const styles = {
